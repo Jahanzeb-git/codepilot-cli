@@ -3,7 +3,7 @@ requires      = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name        = "codepilot-cli"
+name        = "codepilot-cli-app"
 version     = "0.9.6"
 description = "CodePilot – agentic engineering CLI"
 readme      = "README.md"
