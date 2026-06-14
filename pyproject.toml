@@ -1,0 +1,37 @@
+[build-system]
+requires      = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name        = "codepilot-cli"
+version     = "0.9.6"
+description = "CodePilot – agentic engineering CLI"
+readme      = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "rich>=13.7.0",
+    "prompt_toolkit>=3.0.43",
+    "pyyaml>=6.0",
+    "codepilot-ai>=0.9.6",          # your runtime library
+]
+
+[project.scripts]
+codepilot = "cli.__main__:main"
+
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["cli*"]
+
+[tool.setuptools.package-data]
+cli = ["agent.yaml"]
+
+# ── pipx / PyPI metadata ───────────────────────────────────────────────────────
+[project.urls]
+Homepage = "https://github.com/your-org/codepilot"
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "twine",
+]

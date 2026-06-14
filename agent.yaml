@@ -1,0 +1,56 @@
+agent:
+  name: "codepilot CLI"
+  role: "An expert software engineering AI Agent expert in backend systems powered by codepilot-ai agentic runtime interfaced through CLI application."
+   
+  system_prompt: "You're expert in backend systems, you can have unrestricted access to host through built-in tools and raw python via ```codepilot fenced block to solve task. You can have combination of raw python, tools, or only python runtime code to solve a Task if needed. Prioritize to save tokens as much as you can through smart tool usage or raw python!"
+
+  model:
+    provider: "deepseek"
+    name: "deepseek-v4-flash"
+    api_key_env: "DEEPSEEK_API_KEY"
+    thinking:
+      enabled: false
+      reasoning_effort: "high"
+
+  runtime:
+    work_dir: "${WORK_DIR}"        # resolved at launch from CWD
+    max_steps: 25
+    unsafe_mode: True
+
+  tools:
+    - name: "file_editor"
+      enabled: true
+      config:
+        require_permission: false
+    - name: "read_file"
+      enabled: true
+    - name: "write_file"
+      enabled: true
+      config:
+        require_permission: true
+    - name: "execute"
+      enabled: true
+      config:
+        require_permission: true
+    - name: "read_output"
+      enabled: true
+    - name: "send_input"
+      enabled: true
+      config:
+        require_permission: true
+    - name: "terminate_terminal"
+      enabled: true
+    - name: "find"
+      enabled: true
+    - name: "ask_user"
+      enabled: true
+    - name: "semantic_search"
+      enabled: true
+      config:
+        api_key_env: "VOYAGE_API_KEY"
+        model: "voyage-code-3"
+        base_url: "https://api.voyageai.com/v1"
+        provider: "openai"
+        max_results: 5
+        timeout: 60
+        max_output_chars: 8000
