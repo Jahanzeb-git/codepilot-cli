@@ -18,16 +18,16 @@ agent:
     unsafe_mode: True
 
   tools:
-    - name: "file_editor"
-      enabled: true
-      config:
-        require_permission: false
-    - name: "read_file"
+    - name: "view_file"
       enabled: true
     - name: "write_file"
       enabled: true
       config:
         require_permission: true
+    - name: "edit_file"
+      enabled: true
+      config:
+        require_permission: false
     - name: "execute"
       enabled: true
       config:

@@ -596,14 +596,12 @@ def _tool_wait_label(tool: str, args: dict, display: str) -> tuple[str, int | No
     if tool == "write_file":
         path = args.get("path", "file") if isinstance(args, dict) else "file"
         return f"writing {path}", None
-    if tool == "read_file":
+    if tool == "view_file":
         path = args.get("path", "file") if isinstance(args, dict) else "file"
         return f"reading {path}", None
-    if tool == "file_editor":
+    if tool == "edit_file":
         path = args.get("path", "file") if isinstance(args, dict) else "file"
-        mode = args.get("mode", "view") if isinstance(args, dict) else "view"
-        verb = "reading" if mode == "view" else "writing" if mode == "create" else "editing"
-        return f"{verb} {path}", None
+        return f"editing {path}", None
     return f"working {display or tool}", timeout
 
 
@@ -620,25 +618,17 @@ def _tool_call_summary(tool: str, args: dict, display: str) -> str:
         return f"session {session}{suffix}"
     if tool == "write_file":
         path = args.get("path", "") if isinstance(args, dict) else ""
-        mode = args.get("mode", "") if isinstance(args, dict) else ""
-        return f"{path}   {mode}".strip()
-    if tool == "read_file":
+        return path.strip()
+    if tool == "view_file":
         path = args.get("path", "") if isinstance(args, dict) else ""
         start = args.get("start_line") if isinstance(args, dict) else None
         end = args.get("end_line") if isinstance(args, dict) else None
         if start and end:
             return f"{path}   L{start}-{end}"
         return path
-    if tool == "file_editor":
+    if tool == "edit_file":
         path = args.get("path", "") if isinstance(args, dict) else ""
-        mode = args.get("mode", "") if isinstance(args, dict) else ""
-        if mode == "view":
-            start = args.get("start_line") if isinstance(args, dict) else None
-            end = args.get("end_line") if isinstance(args, dict) else None
-            if start and end:
-                return f"{path}   L{start}-{end}   {mode}"
-            return f"{path}   {mode}"
-        return f"{path}   {mode}".strip()
+        return path.strip()
     return _middle_truncate(display, 110)
 
 
@@ -894,13 +884,11 @@ def install_hooks(runtime: Any) -> None:
         _last_args[tool] = args
         spinner.stop()
         display = label or (_truncate(json.dumps(args), 80) if args else "")
-        if tool in ("write_file", "file_editor"):
-            mode = args.get("mode", "w" if tool == "write_file" else "view") if isinstance(args, dict) else ""
-            if mode != "view":
-                path = args.get("path") if isinstance(args, dict) else None
-                work_path = _resolve_work_path(runtime, path)
-                if path:
-                    _file_before[path] = _read_text_if_exists(work_path)
+        if tool in ("write_file", "edit_file"):
+            path = args.get("path") if isinstance(args, dict) else None
+            work_path = _resolve_work_path(runtime, path)
+            if path:
+                _file_before[path] = _read_text_if_exists(work_path)
         _safe_write("\n")
         with _output_lock:
             icon = ">" if tool == "execute" else "•"
@@ -913,11 +901,9 @@ def install_hooks(runtime: Any) -> None:
     def _on_tool_result(tool: str, result: str, **_):
         spinner.stop()
         with _output_lock:
-            if tool == "read_file":
+            if tool == "view_file":
                 _render_file_snapshot(result)
-            elif tool == "file_editor" and _last_args.get(tool, {}).get("mode", "view") == "view":
-                _render_file_snapshot(result)
-            elif tool in ("write_file", "file_editor"):
+            elif tool in ("write_file", "edit_file"):
                 lines = result.splitlines()
                 if lines:
                     console.print(f"   [tool.result]{lines[0]}[/tool.result]")

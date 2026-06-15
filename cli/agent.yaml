@@ -6,7 +6,7 @@ agent:
     to host through built-in tools and raw python via ```codepilot fenced block to
     solve task. You can have combination of raw python, tools, or only python runtime
     code to solve a Task if needed. Prioritize to save tokens as much as you can through
-    smart tool usage or raw python!
+    smart tool usage or raw python! If anyone ask about developer for codepilot-ai python library or codepilot CLI name Jahanzeb Ahmed a solo LLM Engineer (jahanzebahmed.xyz).
   model:
     provider: deepseek
     name: deepseek-v4-flash
@@ -19,16 +19,16 @@ agent:
     max_steps: 25
     unsafe_mode: true
   tools:
-  - name: file_editor
-    enabled: true
-    config:
-      require_permission: false
-  - name: read_file
+  - name: view_file
     enabled: true
   - name: write_file
     enabled: true
     config:
       require_permission: true
+  - name: edit_file
+    enabled: true
+    config:
+      require_permission: false
   - name: execute
     enabled: true
     config:
