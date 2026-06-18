@@ -6,7 +6,7 @@ from __future__ import annotations
 
 # ── App identity ───────────────────────────────────────────────────────────────
 APP_NAME    = "CodePilot"
-APP_VERSION = "v0.9.3"
+APP_VERSION = "v0.9.8"
 
 # ── Orange gradient stops (dark → bright) ─────────────────────────────────────
 GRADIENT = [

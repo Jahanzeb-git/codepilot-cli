@@ -535,6 +535,34 @@ def _split_terminal_result(result: str) -> tuple[str, str, list[str], str]:
     return header, label, body, footer
 
 
+_cached_hostname: str = ""
+
+def _get_short_hostname() -> str:
+    global _cached_hostname
+    if not _cached_hostname:
+        try:
+            import socket as _socket
+            _cached_hostname = _socket.gethostname()
+        except Exception:
+            _cached_hostname = "localhost"
+    return _cached_hostname
+
+
+def _make_shell_prompt(cwd: str) -> str:
+    """Build a shell prompt prefix like 'user@host:~/path$' from a cwd path."""
+    try:
+        user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+        host = _get_short_hostname()
+        home = os.path.expanduser("~")
+        display_cwd = cwd
+        if cwd.startswith(home):
+            display_cwd = "~" + cwd[len(home):]
+        who = f"{user}@{host}" if user else host
+        return f"{who}:{display_cwd}$"
+    except Exception:
+        return "$"
+
+
 def _render_terminal_result(result: str, *, max_lines: int = 28) -> None:
     lines = result.splitlines()
     if not lines:
@@ -542,43 +570,55 @@ def _render_terminal_result(result: str, *, max_lines: int = 28) -> None:
         return
     header, label, body, footer = _split_terminal_result(result)
     status = ""
+    cwd = ""
     if footer:
         status_match = re.search(r"\[status:\s*([^|\]]+)", footer)
         if status_match:
             status = status_match.group(1).strip()
-    if status == "completed":
-        status_str = "✔ Completed"
-        status_style = "success"
-    elif status == "running":
-        status_str = "⟳ Running"
-        status_style = "warn"
-    else:
-        status_str = status
-        status_style = "success"
-    status_text = f"   [{status_style}]{status_str}[/{status_style}]" if status else ""
-    console.print(f"   [tool.result]{header}[/tool.result]{status_text}")
+        cwd_match = re.search(r"cwd:\s*([^|\]]+)", footer)
+        if cwd_match:
+            cwd = cwd_match.group(1).strip()
 
+    # Build shell prompt prefix for the command label
+    shell_prompt = _make_shell_prompt(cwd) if cwd else "$"
+
+    if status == "completed":
+        status_style = "success"
+        status_icon = "✔"
+    elif status == "running":
+        status_style = "warn"
+        status_icon = "⟳"
+    else:
+        status_style = "success"
+        status_icon = ""
+
+    console.print(f"   [tool.result]{header}[/tool.result]")
+
+    # Show the command label with the full shell prompt prefix
     if label and label not in ("(continued output)", "(complete output)"):
-        console.print(f"      [diff.meta]$ {_middle_truncate(label[2:] if label.startswith('$ ') else label, 110)}[/diff.meta]")
+        cmd_text = label[2:] if label.startswith("$ ") else label
+        cmd_display = _middle_truncate(cmd_text, 110)
+        console.print(f"   [dim #555555]{shell_prompt}[/dim #555555] [diff.meta]{cmd_display}[/diff.meta]")
     elif label:
-        console.print(f"      [diff.meta]{label}[/diff.meta]")
+        console.print(f"   [diff.meta]{label}[/diff.meta]")
 
     omitted = max(0, len(body) - max_lines)
     for line in body[:max_lines]:
         if "status=running" in line or "running" in line.lower():
-            console.print(f"      [warn]{line}[/warn]")
+            console.print(f"   [warn]{line}[/warn]")
         elif line == label:
             continue
         elif "Permission denied" in line or "Error:" in line:
-            console.print(f"      [error]{line}[/error]")
+            console.print(f"   [error]{line}[/error]")
         else:
-            console.print(f"      [terminal]{line}[/terminal]")
+            console.print(f"   [terminal]{line}[/terminal]")
     if omitted:
-        console.print(f"      [muted]... {omitted} output lines omitted[/muted]")
-    if footer:
-        console.print(f"      [diff.meta]{footer}[/diff.meta]")
+        console.print(f"   [muted]... {omitted} output lines omitted[/muted]")
+    # Show status + cwd footer as a clean summary line
+    if status and status_icon:
+        console.print(f"   [{status_style}]{status_icon} {status.capitalize()}[/{status_style}]")
     if "status=running" in result or "[running]" in result:
-        console.print("      [muted]process is still running; agent can call read_output() to wait for more[/muted]")
+        console.print("   [muted]process still running — call read_output() to wait for more[/muted]")
 
 
 def _tool_wait_label(tool: str, args: dict, display: str) -> tuple[str, int | None]:
@@ -673,6 +713,19 @@ def show_sessions_picker() -> str | None:
 
 # ── Permission prompt ──────────────────────────────────────────────────────────
 
+# Lines printed by ask_permission before the prompt_toolkit input:
+#  1 blank, 1 header, 1 blank, 1 desc, 1 blank, 1 rule, 1 blank, 1 hints, 1 blank
+#  = 9 lines (plus the prompt_toolkit prompt line itself = 10 total to erase)
+_PERM_LINES_ABOVE_PROMPT = 10
+
+
+def _erase_n_lines(n: int) -> None:
+    """Move cursor up n lines and erase each one, leaving cursor at start of first erased line."""
+    for _ in range(n):
+        sys.stdout.write("\x1b[A\x1b[2K")
+    sys.stdout.flush()
+
+
 def ask_permission(runtime: Any, tool: str, description: str) -> bool:
     # ── Header: permission label + tool name
     console.print()
@@ -723,11 +776,14 @@ def ask_permission(runtime: Any, tool: str, description: str) -> bool:
         key = "reject"
 
     if key == "allow":
-        console.print("   [success]✔ Approved[/success]")
-        console.print()
+        # Erase the entire permission block (all lines above + prompt line)
+        # so only the compact approval badge remains.
+        _erase_n_lines(_PERM_LINES_ABOVE_PROMPT)
+        console.print(f"   [success]✔ Approved[/success]   [dim #444444]{tool}[/dim #444444]")
         return True
 
     if key == "instruct":
+        _erase_n_lines(_PERM_LINES_ABOVE_PROMPT)
         try:
             prompt = PromptSession(style=PT_STYLE)
             instruction = prompt.prompt(
@@ -740,14 +796,14 @@ def ask_permission(runtime: Any, tool: str, description: str) -> bool:
                 f"Permission guidance for {tool}: the requested action was not approved. "
                 f"Instead, follow this instruction: {instruction}"
             )
-            console.print("   [question]instruction queued for agent[/question]")
+            console.print("   [question]↑ instruction queued[/question]")
         else:
-            console.print("   [muted]no instruction entered; rejected[/muted]")
-        console.print()
+            console.print("   [muted]no instruction entered — rejected[/muted]")
         return False
 
-    console.print("   [error]✖ Rejected[/error]")
-    console.print()
+    # Rejected
+    _erase_n_lines(_PERM_LINES_ABOVE_PROMPT)
+    console.print(f"   [error]✖ Rejected[/error]   [dim #444444]{tool}[/dim #444444]")
     return False
 
 
