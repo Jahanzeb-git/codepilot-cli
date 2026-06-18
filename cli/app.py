@@ -34,6 +34,7 @@ from rich.rule import Rule
 from rich.theme import Theme
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.syntax import Syntax as RichSyntax
 
 from prompt_toolkit.application import Application
 from prompt_toolkit import PromptSession
@@ -494,23 +495,126 @@ def _print_diff_lines(lines: list[str], *, max_lines: int = 80) -> None:
         console.print(f"      [muted]... {omitted} diff lines omitted[/muted]")
 
 
-def _render_file_snapshot(result: str, *, max_lines: int = 70) -> None:
+# Extension → Pygments lexer name (for syntax highlighting)
+_EXT_TO_LEXER: dict[str, str] = {
+    ".py":    "python",
+    ".js":    "javascript",
+    ".ts":    "typescript",
+    ".jsx":   "jsx",
+    ".tsx":   "tsx",
+    ".go":    "go",
+    ".rs":    "rust",
+    ".c":     "c",
+    ".cpp":   "cpp",
+    ".h":     "c",
+    ".cs":    "csharp",
+    ".java":  "java",
+    ".rb":    "ruby",
+    ".php":   "php",
+    ".sh":    "bash",
+    ".bash":  "bash",
+    ".zsh":   "bash",
+    ".yaml":  "yaml",
+    ".yml":   "yaml",
+    ".json":  "json",
+    ".toml":  "toml",
+    ".ini":   "ini",
+    ".cfg":   "ini",
+    ".md":    "markdown",
+    ".html":  "html",
+    ".css":   "css",
+    ".sql":   "sql",
+    ".xml":   "xml",
+    ".tf":    "terraform",
+    ".dockerfile": "dockerfile",
+    ".r":     "r",
+    ".swift": "swift",
+    ".kt":    "kotlin",
+    ".lua":   "lua",
+    ".hs":    "haskell",
+    ".ex":    "elixir",
+    ".exs":   "elixir",
+    ".scala": "scala",
+    ".vim":   "vim",
+    ".el":    "elisp",
+    ".jl":    "julia",
+    ".dart":  "dart",
+}
+
+
+def _lexer_for_path(path: str) -> str:
+    """Return a Pygments lexer name for the given file path."""
+    ext = Path(path).suffix.lower()
+    # Special-case files with no extension but known names
+    name = Path(path).name.lower()
+    if name in ("dockerfile", "containerfile"):
+        return "dockerfile"
+    if name in ("makefile", "gnumakefile"):
+        return "makefile"
+    return _EXT_TO_LEXER.get(ext, "text")
+
+
+def _render_file_with_highlight(path: str, code: str, start_line: int = 1) -> None:
+    """Render code with Rich syntax highlighting and line numbers."""
+    if not code:
+        return
+    lexer = _lexer_for_path(path)
+    try:
+        syn = RichSyntax(
+            code,
+            lexer,
+            theme="monokai",
+            line_numbers=True,
+            start_line=start_line,
+            indent_guides=False,
+            word_wrap=False,
+            background_color="default",
+        )
+        # Indent the block slightly for visual consistency
+        console.print(syn)
+    except Exception:
+        # Fallback to plain numbered lines if lexer fails
+        for i, line in enumerate(code.splitlines(), start=start_line):
+            console.print(f"   [diff.no]{i:4} |[/diff.no] [diff.ctx]{line}[/diff.ctx]")
+
+
+def _render_file_snapshot(result: str, *, max_lines: int = 70, path: str = "") -> None:
+    """Render view_file output with syntax highlighting."""
     lines = result.splitlines()
     if not lines:
         return
     console.print(f"   [tool.result]{lines[0]}[/tool.result]")
+
     body = lines[1:]
-    omitted = max(0, len(body) - max_lines)
+    # Detect start_line from the first numbered line ("  1 | code" or " 42 | code")
+    start_line = 1
+    if body and " | " in body[0][:8]:
+        try:
+            start_line = int(body[0].split(" | ", 1)[0].strip())
+        except ValueError:
+            pass
+
+    # Collect footer lines ([END...], [TRUNCATED...])
+    footers: list[str] = []
+    code_lines: list[str] = []
     for line in body[:max_lines]:
         if line.startswith("[END") or line.startswith("[TRUNCATED"):
-            console.print(f"      [diff.meta]{line}[/diff.meta]")
-        elif " | " in line[:10]:
-            number, content = line.split(" | ", 1)
-            console.print(f"      [diff.no]{number} |[/diff.no] [diff.add]{content}[/diff.add]")
+            footers.append(line)
+        elif " | " in line[:8]:
+            _, content = line.split(" | ", 1)
+            code_lines.append(content)
         else:
-            console.print(f"      [diff.ctx]{line}[/diff.ctx]")
+            code_lines.append(line)
+
+    omitted = max(0, len(body) - max_lines)
+
+    if code_lines:
+        _render_file_with_highlight(path, "\n".join(code_lines), start_line)
+
+    for f in footers:
+        console.print(f"   [diff.meta]{f}[/diff.meta]")
     if omitted:
-        console.print(f"      [muted]... {omitted} lines omitted[/muted]")
+        console.print(f"   [muted]... {omitted} lines omitted[/muted]")
 
 
 def _split_terminal_result(result: str) -> tuple[str, str, list[str], str]:
@@ -582,21 +686,15 @@ def _render_terminal_result(result: str, *, max_lines: int = 28) -> None:
     # Build shell prompt prefix for the command label
     shell_prompt = _make_shell_prompt(cwd) if cwd else "$"
 
-    if status == "completed":
-        status_style = "success"
-        status_icon = "✔"
-    elif status == "running":
-        status_style = "warn"
-        status_icon = "⟳"
-    else:
-        status_style = "success"
-        status_icon = ""
+    # The raw command text without the leading "$ " (used to filter PTY echo)
+    cmd_text = ""
+    if label and label not in ("(continued output)", "(complete output)"):
+        cmd_text = label[2:] if label.startswith("$ ") else label
 
     console.print(f"   [tool.result]{header}[/tool.result]")
 
     # Show the command label with the full shell prompt prefix
-    if label and label not in ("(continued output)", "(complete output)"):
-        cmd_text = label[2:] if label.startswith("$ ") else label
+    if cmd_text:
         cmd_display = _middle_truncate(cmd_text, 110)
         console.print(f"   [dim #555555]{shell_prompt}[/dim #555555] [diff.meta]{cmd_display}[/diff.meta]")
     elif label:
@@ -604,20 +702,20 @@ def _render_terminal_result(result: str, *, max_lines: int = 28) -> None:
 
     omitted = max(0, len(body) - max_lines)
     for line in body[:max_lines]:
-        if "status=running" in line or "running" in line.lower():
-            console.print(f"   [warn]{line}[/warn]")
-        elif line == label:
+        # Filter PTY echo: skip lines that are exactly the command text
+        # (with or without trailing \r, with or without the "$ " prefix)
+        stripped = line.rstrip("\r")
+        if cmd_text and (stripped == cmd_text or stripped == label):
             continue
+        if "status=running" in line:
+            console.print(f"   [warn]{line}[/warn]")
         elif "Permission denied" in line or "Error:" in line:
             console.print(f"   [error]{line}[/error]")
         else:
             console.print(f"   [terminal]{line}[/terminal]")
     if omitted:
         console.print(f"   [muted]... {omitted} output lines omitted[/muted]")
-    # Show status + cwd footer as a clean summary line
-    if status and status_icon:
-        console.print(f"   [{status_style}]{status_icon} {status.capitalize()}[/{status_style}]")
-    if "status=running" in result or "[running]" in result:
+    if status == "running":
         console.print("   [muted]process still running — call read_output() to wait for more[/muted]")
 
 
@@ -776,10 +874,8 @@ def ask_permission(runtime: Any, tool: str, description: str) -> bool:
         key = "reject"
 
     if key == "allow":
-        # Erase the entire permission block (all lines above + prompt line)
-        # so only the compact approval badge remains.
+        # Erase the entire permission block — silent approval, no badge
         _erase_n_lines(_PERM_LINES_ABOVE_PROMPT)
-        console.print(f"   [success]✔ Approved[/success]   [dim #444444]{tool}[/dim #444444]")
         return True
 
     if key == "instruct":
@@ -958,28 +1054,42 @@ def install_hooks(runtime: Any) -> None:
         spinner.stop()
         with _output_lock:
             if tool == "view_file":
-                _render_file_snapshot(result)
+                # Get path from last args for syntax highlighting
+                args = _last_args.get(tool, {})
+                path = args.get("path", "") if isinstance(args, dict) else ""
+                _render_file_snapshot(result, path=path)
             elif tool in ("write_file", "edit_file"):
+                args = _last_args.get(tool, {})
+                path = args.get("path") if isinstance(args, dict) else None
                 lines = result.splitlines()
                 if lines:
                     console.print(f"   [tool.result]{lines[0]}[/tool.result]")
-                args = _last_args.get(tool, {})
-                path = args.get("path") if isinstance(args, dict) else None
-                before = _file_before.pop(path, "") if path else ""
-                after = _read_text_if_exists(_resolve_work_path(runtime, path))
-                if path and ("ERROR" not in result) and (before or after):
-                    diff = list(difflib.unified_diff(
-                        before.splitlines(),
-                        after.splitlines(),
-                        fromfile=f"a/{path}",
-                        tofile=f"b/{path}",
-                        lineterm="",
-                        n=3,
-                    ))
-                    if diff:
-                        _print_diff_lines(diff)
-                elif len(lines) > 1:
-                    _print_diff_lines(lines[1:])
+
+                if tool == "write_file" and path and "ERROR" not in result:
+                    # Show the written file with line numbers + syntax highlighting
+                    work_path = _resolve_work_path(runtime, path)
+                    written = _read_text_if_exists(work_path)
+                    if written:
+                        _render_file_with_highlight(path, written, start_line=1)
+                elif tool == "edit_file":
+                    before = _file_before.pop(path, "") if path else ""
+                    after = _read_text_if_exists(_resolve_work_path(runtime, path))
+                    if path and "ERROR" not in result and (before or after):
+                        diff = list(difflib.unified_diff(
+                            before.splitlines(),
+                            after.splitlines(),
+                            fromfile=f"a/{path}",
+                            tofile=f"b/{path}",
+                            lineterm="",
+                            n=3,
+                        ))
+                        if diff:
+                            _print_diff_lines(diff)
+                    elif len(lines) > 1:
+                        _print_diff_lines(lines[1:])
+                else:
+                    # write_file error or no content — clear the file_before entry
+                    _file_before.pop(path, None)
             elif tool in ("execute", "read_output", "send_input"):
                 _render_terminal_result(result)
             else:
