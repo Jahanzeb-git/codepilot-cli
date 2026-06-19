@@ -13,7 +13,7 @@ dependencies = [
     "rich>=13.7.0",
     "prompt_toolkit>=3.0.43",
     "pyyaml>=6.0",
-    "codepilot-ai>=0.9.7",          # your runtime library
+    "codepilot-ai>=0.9.9",          # your runtime library
 ]
 
 [project.scripts]
